@@ -2,7 +2,17 @@ import Link from "next/link";
 
 export default function Home() {
   return (
-    <div className="container">
+    import Link from "next/link";
+
+export default function Home() {
+  return (
+    <main 
+      className="min-h-screen bg-cover bg-center relative p-12"
+      style={{
+        backgroundImage: `linear-gradient(rgba(10, 25, 15, 0.85), rgba(10, 25, 15, 0.85)), url('https://images.unsplash.com/photo-1596191410411-a892b15e2f7f?q=80&w=1600&auto=format&fit=crop')`
+      }}
+    >
+      <div className="top-nav" style={{ padding: 0, border: "none", marginBottom: 40 }}>
       <div className="top-nav" style={{ padding: 0, border: "none", marginBottom: 40 }}>
         <div className="brand">🌿 Canopée</div>
       </div>
