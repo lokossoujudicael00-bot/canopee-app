@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { useState } from "react";
+import { generatePaymentPdf } from "@/lib/pdf";
 
-const COOPS = ["IRETI M'BE", "Union Karité Savè", "Coop Néré Ouoghi"];
+const COOP_SUGGESTIONS = ["IRETI M'BE", "Union Karité Savè", "Coop Néré Ouoghi"];
 const METHODS = [
   { value: "mobile_money", label: "Mobile Money" },
   { value: "especes", label: "Espèces" },
@@ -11,11 +11,9 @@ const METHODS = [
 ];
 
 export default function PaiementPage() {
-  const [parcels, setParcels] = useState([]);
-  const [selectedParcelId, setSelectedParcelId] = useState("");
   const [form, setForm] = useState({
     producerName: "",
-    coop: COOPS[0],
+    coop: "",
     weightKg: "",
     pricePerKg: "",
     paymentMethod: "mobile_money",
@@ -25,38 +23,18 @@ export default function PaiementPage() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    async function loadParcels() {
-      const { data } = await supabase
-        .from("parcels")
-        .select("id, producer_name, coop, product")
-        .order("created_at", { ascending: false });
-      setParcels(data || []);
-    }
-    loadParcels();
-  }, []);
-
-  function selectParcel(id) {
-    setSelectedParcelId(id);
-    const p = parcels.find((x) => x.id === id);
-    if (p) {
-      setForm((f) => ({ ...f, producerName: p.producer_name, coop: p.coop }));
-    }
-  }
-
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
   }
 
-  const total =
-    (parseFloat(form.weightKg) || 0) * (parseFloat(form.pricePerKg) || 0);
+  const total = (parseFloat(form.weightKg) || 0) * (parseFloat(form.pricePerKg) || 0);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
 
-    if (!form.producerName.trim() || !form.weightKg || !form.pricePerKg) {
-      setError("Merci de remplir le nom, le poids et le prix au kilo.");
+    if (!form.producerName.trim() || !form.coop.trim() || !form.weightKg || !form.pricePerKg) {
+      setError("Merci de remplir le nom, la coopérative, le poids et le prix au kilo.");
       return;
     }
 
@@ -65,8 +43,9 @@ export default function PaiementPage() {
       const res = await fetch("/api/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // Saisie entièrement manuelle : aucune parcelle existante n'est requise pour
+        // enregistrer un paiement, exactement comme le nom de la coopérative.
         body: JSON.stringify({
-          parcelId: selectedParcelId || null,
           producerName: form.producerName,
           coop: form.coop,
           weightKg: form.weightKg,
@@ -87,6 +66,7 @@ export default function PaiementPage() {
 
   if (result) {
     return (
+      <div className="page-bg page-bg-paiement">
       <div className="container">
         <div className="card" style={{ maxWidth: 480, margin: "60px auto", textAlign: "center" }}>
           <h2>✅ Paiement enregistré</h2>
@@ -94,18 +74,21 @@ export default function PaiementPage() {
             {result.producer_name} a été payé {result.total_amount.toLocaleString("fr-FR")} FCFA
             pour {result.weight_kg} kg, le {result.payment_date}.
           </p>
-          <p style={{ fontSize: 12, color: "rgba(233,228,216,0.45)" }}>
-            Ce reçu est consultable à tout moment dans le registre des paiements.
-          </p>
+          <button
+            className="btn"
+            style={{ marginTop: 12, width: "100%" }}
+            onClick={() => generatePaymentPdf(result)}
+          >
+            📄 Télécharger le reçu PDF
+          </button>
           <button
             className="btn secondary"
-            style={{ marginTop: 12 }}
+            style={{ marginTop: 10 }}
             onClick={() => {
               setResult(null);
-              setSelectedParcelId("");
               setForm({
                 producerName: "",
-                coop: COOPS[0],
+                coop: "",
                 weightKg: "",
                 pricePerKg: "",
                 paymentMethod: "mobile_money",
@@ -117,10 +100,12 @@ export default function PaiementPage() {
           </button>
         </div>
       </div>
+      </div>
     );
   }
 
   return (
+    <div className="page-bg page-bg-paiement">
     <div className="container">
       <div className="card" style={{ maxWidth: 480, margin: "0 auto" }}>
         <h2>💰 Enregistrer un paiement</h2>
@@ -129,16 +114,6 @@ export default function PaiementPage() {
         </p>
 
         <form onSubmit={handleSubmit}>
-          <label>Lier à une parcelle déjà enregistrée (optionnel)</label>
-          <select value={selectedParcelId} onChange={(e) => selectParcel(e.target.value)}>
-            <option value="">— Aucune parcelle liée —</option>
-            {parcels.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.producer_name} — {p.coop} ({p.product})
-              </option>
-            ))}
-          </select>
-
           <label>Nom du producteur</label>
           <input
             value={form.producerName}
@@ -148,11 +123,18 @@ export default function PaiementPage() {
           />
 
           <label>Coopérative</label>
-          <select value={form.coop} onChange={(e) => update("coop", e.target.value)}>
-            {COOPS.map((c) => (
-              <option key={c} value={c}>{c}</option>
+          <input
+            list="coop-suggestions"
+            value={form.coop}
+            onChange={(e) => update("coop", e.target.value)}
+            placeholder="Nom de la coopérative"
+            required
+          />
+          <datalist id="coop-suggestions">
+            {COOP_SUGGESTIONS.map((c) => (
+              <option key={c} value={c} />
             ))}
-          </select>
+          </datalist>
 
           <label>Poids acheté (kg)</label>
           <input
@@ -202,6 +184,7 @@ export default function PaiementPage() {
           </button>
         </form>
       </div>
+    </div>
     </div>
   );
 }
