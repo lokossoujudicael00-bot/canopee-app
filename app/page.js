@@ -1,15 +1,22 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
 
 export default function Home() {
-  const router = useRouter();
+  const [user, setUser] = useState(null);
   const [formData, setFormData] = useState({
     nom: '',
     telephone: '',
     role: 'Producteur / Agriculteur'
   });
+
+  useEffect(() => {
+    const session = localStorage.getItem('user_session');
+    if (session) {
+      setUser(JSON.parse(session));
+    }
+  }, []);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -17,14 +24,45 @@ export default function Home() {
       alert("Veuillez remplir votre nom et votre numéro de téléphone.");
       return;
     }
-    
-    // Sauvegarde la session dans le navigateur
     localStorage.setItem('user_session', JSON.stringify(formData));
-    
-    // Redirige vers la page d'accueil avec les fonctionnalités
-    router.push('/accueil');
+    setUser(formData);
   };
 
+  // SI L'UTILISATEUR EST INSCRIT -> AFFICHER LA PAGE D'ACCUEIL (3 BOUTONS)
+  if (user) {
+    return (
+      <div className="container">
+        <div className="top-nav" style={{ padding: 0, border: "none", marginBottom: 40, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="brand">🌿 Canopée</div>
+          <button 
+            onClick={() => { localStorage.removeItem('user_session'); setUser(null); }}
+            style={{ background: "transparent", border: "1px solid #444", color: "#ccc", padding: "6px 12px", borderRadius: 6, cursor: "pointer" }}
+          >
+            Déconnexion
+          </button>
+        </div>
+
+        <h1 style={{ fontSize: 32 }}>Traçabilité EUDR pour vos coopératives fournisseurs</h1>
+        <p style={{ color: "rgba(233,228,216,0.6)", maxWidth: 560, marginBottom: 32 }}>
+          Collecte les données GPS de vos producteurs, suit les paiements, et génère automatiquement vos déclarations de conformité déforestation.
+        </p>
+
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <Link href="/producteur" className="btn" style={{ textDecoration: "none", display: "inline-block" }}>
+            📍 Enregistrer une parcelle
+          </Link>
+          <Link href="/paiement" className="btn" style={{ textDecoration: "none", display: "inline-block", background: "#C9984E" }}>
+            💰 Enregistrer un paiement
+          </Link>
+          <Link href="/dashboard" className="btn secondary" style={{ textDecoration: "none", display: "inline-block" }}>
+            📊 Voir le tableau de bord
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // SI NON INSCRIT -> AFFICHER LE FORMULAIRE D'INSCRIPTION
   return (
     <div className="container" style={{ maxWidth: 480, margin: "40px auto", padding: "0 20px" }}>
       <div className="top-nav" style={{ padding: 0, border: "none", marginBottom: 24, textAlign: "center" }}>
