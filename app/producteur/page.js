@@ -1,102 +1,353 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import Link from 'next/link';
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import { generateParcelPdf } from "@/lib/pdf";
 
-export default function Producteur() {
-  const [formData, setFormData] = useState({
-    nom: '',
-    cooperative: '',
-    produit: 'Karité',
-    superficie: '',
-    latitude: '',
-    longitude: ''
-  });
-  const [status, setStatus] = useState('');
+const OFFLINE_QUEUE_KEY = "canopee_offline_queue";
 
-  const getLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition((position) => {
-        setFormData({
-          ...formData,
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude
-        });
-        setStatus('📍 Position capturée avec succès !');
-      }, () => {
-        setStatus('❌ Impossible de récupérer la position GPS.');
+function getQueue() {
+  try {
+    return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveQueue(queue) {
+  localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+}
+
+async function trySyncQueue() {
+  const queue = getQueue();
+  if (queue.length === 0) return { synced: 0, remaining: 0 };
+
+  const remaining = [];
+  let synced = 0;
+
+  for (const entry of queue) {
+    try {
+      const res = await fetch("/api/parcels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(entry),
       });
+      if (res.ok) {
+        synced++;
+      } else {
+        remaining.push(entry);
+      }
+    } catch {
+      remaining.push(entry);
     }
-  };
+  }
 
-  const handleSubmit = (e) => {
+  saveQueue(remaining);
+  return { synced, remaining: remaining.length };
+}
+
+// Suggestions affichées pendant la saisie, mais le champ reste libre : sur le terrain,
+// chaque producteur appartient à sa propre coopérative, souvent absente de toute liste figée.
+const COOP_SUGGESTIONS = ["IRETI M'BE", "Union Karité Savè", "Coop Néré Ouoghi"];
+const PRODUCTS = ["Karité", "Néré", "Cacao", "Café"];
+
+export default function ProducteurPage() {
+  const [form, setForm] = useState({
+    producerName: "",
+    coop: "",
+    product: PRODUCTS[0],
+    areaHa: "",
+  });
+  const [location, setLocation] = useState(null);
+  const [locError, setLocError] = useState("");
+  const [photoFile, setPhotoFile] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const [isOnline, setIsOnline] = useState(true);
+  const [queueCount, setQueueCount] = useState(0);
+  const [savedOffline, setSavedOffline] = useState(false);
+
+  useEffect(() => {
+    setIsOnline(navigator.onLine);
+    setQueueCount(getQueue().length);
+
+    async function handleOnline() {
+      setIsOnline(true);
+      const result = await trySyncQueue();
+      setQueueCount(getQueue().length);
+      if (result.synced > 0) {
+        console.log(`${result.synced} parcelle(s) synchronisée(s)`);
+      }
+    }
+    function handleOffline() {
+      setIsOnline(false);
+    }
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    // Tente une synchro dès le chargement de la page, au cas où il y aurait un reliquat
+    if (navigator.onLine) handleOnline();
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  function update(field, value) {
+    setForm((f) => ({ ...f, [field]: value }));
+  }
+
+  function captureLocation() {
+    setLocError("");
+    if (!navigator.geolocation) {
+      setLocError("La géolocalisation n'est pas disponible sur cet appareil.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        });
+      },
+      (err) => {
+        setLocError("Impossible d'obtenir la position : " + err.message);
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  }
+
+  async function handleSubmit(e) {
     e.preventDefault();
-    const producteurs = JSON.parse(localStorage.getItem('producteurs') || '[]');
-    producteurs.push({ ...formData, id: Date.now(), date: new Date().toISOString().split('T')[0] });
-    localStorage.setItem('producteurs', JSON.stringify(producteurs));
-    alert('Parcelle enregistrée avec succès !');
-    setFormData({ nom: '', cooperative: '', produit: 'Karité', superficie: '', latitude: '', longitude: '' });
-    setStatus('');
-  };
+    setError("");
+
+    if (!location) {
+      setError("Merci de partager votre position avant de valider.");
+      return;
+    }
+    if (!form.producerName.trim()) {
+      setError("Merci d'indiquer le nom du producteur.");
+      return;
+    }
+    if (!form.coop.trim()) {
+      setError("Merci d'indiquer le nom de la coopérative.");
+      return;
+    }
+
+    setSubmitting(true);
+
+    const payload = {
+      producerName: form.producerName,
+      coop: form.coop,
+      product: form.product,
+      lat: location.lat,
+      lng: location.lng,
+      areaHa: form.areaHa ? parseFloat(form.areaHa) : null,
+      photoUrl: null,
+    };
+
+    // Pas de réseau : on sauvegarde localement sur l'appareil et on synchronisera plus tard.
+    // La photo n'est pas envoyée hors-ligne (trop volumineuse pour le stockage local) —
+    // seules les données essentielles (nom, coop, produit, GPS, surface) sont mises en file.
+    if (!navigator.onLine) {
+      const queue = getQueue();
+      queue.push(payload);
+      saveQueue(queue);
+      setQueueCount(queue.length);
+      setSavedOffline(true);
+      setSubmitting(false);
+      return;
+    }
+
+    try {
+      let photoUrl = null;
+
+      if (photoFile) {
+        const fileName = `${Date.now()}-${photoFile.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from("photos")
+          .upload(fileName, photoFile);
+
+        if (uploadError) throw new Error("Échec de l'envoi de la photo : " + uploadError.message);
+
+        const { data: publicUrlData } = supabase.storage.from("photos").getPublicUrl(fileName);
+        photoUrl = publicUrlData.publicUrl;
+      }
+
+      const res = await fetch("/api/parcels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, photoUrl }),
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Erreur lors de l'enregistrement.");
+
+      setResult(json.parcel);
+    } catch (err) {
+      // Le réseau a lâché en cours de route : on bascule en secours hors-ligne
+      // plutôt que de perdre les données du producteur.
+      const queue = getQueue();
+      queue.push(payload);
+      saveQueue(queue);
+      setQueueCount(queue.length);
+      setSavedOffline(true);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (result || savedOffline) {
+    return (
+      <div className="page-bg page-bg-parcelle">
+      <div className="container">
+        <div className="card" style={{ maxWidth: 480, margin: "60px auto", textAlign: "center" }}>
+          {result ? (
+            <>
+              <h2>✅ Parcelle enregistrée</h2>
+              <p style={{ color: "rgba(233,228,216,0.6)" }}>
+                Merci {result.producer_name}, votre parcelle a bien été enregistrée pour {result.coop}.
+              </p>
+              <button
+                className="btn"
+                style={{ width: "100%", marginBottom: 10 }}
+                onClick={() => generateParcelPdf(result)}
+              >
+                📄 Télécharger la fiche PDF
+              </button>
+            </>
+          ) : (
+            <>
+              <h2>📴 Enregistré sur l'appareil</h2>
+              <p style={{ color: "rgba(233,228,216,0.6)" }}>
+                Pas de connexion internet détectée. Les informations de {form.producerName} sont
+                sauvegardées sur ce téléphone et seront envoyées automatiquement dès que la
+                connexion reviendra. Ne désinstalle pas l'application avant la synchronisation.
+              </p>
+              {queueCount > 0 && (
+                <p style={{ fontSize: 12, color: "#C99B4E" }}>
+                  {queueCount} parcelle{queueCount > 1 ? "s" : ""} en attente d'envoi.
+                </p>
+              )}
+            </>
+          )}
+          <button
+            className="btn secondary"
+            style={{ marginTop: 12 }}
+            onClick={() => {
+              setResult(null);
+              setSavedOffline(false);
+              setForm({ producerName: "", coop: "", product: PRODUCTS[0], areaHa: "" });
+              setLocation(null);
+              setPhotoFile(null);
+            }}
+          >
+            + Enregistrer une autre parcelle
+          </button>
+        </div>
+      </div>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ maxWidth: 540, margin: "40px auto", padding: "32px 24px", borderRadius: 16, background: "rgba(18, 26, 20, 0.85)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(12px)", boxShadow: "0 20px 40px rgba(0,0,0,0.5)" }}>
-      <Link href="/" style={{ color: "rgba(255,255,255,0.5)", textDecoration: "none", fontSize: 13, display: "inline-block", marginBottom: 20 }}>
-        ← Retour à l'accueil
-      </Link>
-      
-      <h1 style={{ fontSize: 28, fontFamily: "serif", fontWeight: "normal", color: "#f3f4f6", marginBottom: 8 }}>
-        📍 Enregistrer ma parcelle
-      </h1>
-      <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 13, lineHeight: 1.5, marginBottom: 28 }}>
-        Ces informations servent à prouver la conformité de votre production auprès des acheteurs européens.
-      </p>
+    <div className="page-bg page-bg-parcelle">
+    <div className="container">
+      <div className="card" style={{ maxWidth: 480, margin: "0 auto" }}>
+        {!isOnline && (
+          <div
+            style={{
+              background: "rgba(201,155,78,0.15)",
+              color: "#C99B4E",
+              padding: "8px 12px",
+              borderRadius: 8,
+              fontSize: 12,
+              marginBottom: 16,
+            }}
+          >
+            📴 Pas de connexion — vos données seront sauvegardées sur l'appareil et envoyées
+            automatiquement dès que le réseau reviendra.
+          </div>
+        )}
+        {queueCount > 0 && isOnline && (
+          <div
+            style={{
+              background: "rgba(127,176,105,0.15)",
+              color: "#7FB069",
+              padding: "8px 12px",
+              borderRadius: 8,
+              fontSize: 12,
+              marginBottom: 16,
+            }}
+          >
+            🔄 Synchronisation de {queueCount} parcelle{queueCount > 1 ? "s" : ""} en attente…
+          </div>
+        )}
+        <h2>📍 Enregistrer ma parcelle</h2>
+        <p style={{ color: "rgba(233,228,216,0.55)", fontSize: 13, marginBottom: 20 }}>
+          Ces informations servent à prouver la conformité de votre production auprès des
+          acheteurs européens.
+        </p>
 
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-        <div>
-          <label style={labelStyle}>Nom complet</label>
-          <input type="text" required placeholder="Ex : Rufin Ahouansou" value={formData.nom} onChange={e => setFormData({...formData, nom: e.target.value})} style={inputStyle} />
-        </div>
+        <form onSubmit={handleSubmit}>
+          <label>Nom complet</label>
+          <input
+            value={form.producerName}
+            onChange={(e) => update("producerName", e.target.value)}
+            placeholder="Ex : Rufin Ahouansou"
+            required
+          />
 
-        <div>
-          <label style={labelStyle}>Coopérative</label>
-          <input type="text" required placeholder="Nom de votre coopérative" value={formData.cooperative} onChange={e => setFormData({...formData, cooperative: e.target.value})} style={inputStyle} />
-        </div>
+          <label>Coopérative</label>
+          <input
+            list="coop-suggestions"
+            value={form.coop}
+            onChange={(e) => update("coop", e.target.value)}
+            placeholder="Nom de votre coopérative"
+            required
+          />
+          <datalist id="coop-suggestions">
+            {COOP_SUGGESTIONS.map((c) => (
+              <option key={c} value={c} />
+            ))}
+          </datalist>
 
-        <div>
-          <label style={labelStyle}>Produit</label>
-          <select value={formData.produit} onChange={e => setFormData({...formData, produit: e.target.value})} style={selectStyle}>
-            <option style={{background: "#121a14"}}>Karité</option>
-            <option style={{background: "#121a14"}}>Cacao</option>
-            <option style={{background: "#121a14"}}>Café</option>
-            <option style={{background: "#121a14"}}>Soja</option>
-            <option style={{background: "#121a14"}}>Anacarde</option>
+          <label>Produit</label>
+          <select value={form.product} onChange={(e) => update("product", e.target.value)}>
+            {PRODUCTS.map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
           </select>
-        </div>
 
-        <div>
-          <label style={labelStyle}>Superficie approximative (hectares)</label>
-          <input type="number" step="0.1" required placeholder="Ex : 1.5" value={formData.superficie} onChange={e => setFormData({...formData, superficie: e.target.value})} style={inputStyle} />
-        </div>
+          <label>Superficie approximative (hectares)</label>
+          <input
+            type="number"
+            step="0.1"
+            value={form.areaHa}
+            onChange={(e) => update("areaHa", e.target.value)}
+            placeholder="Ex : 1.5"
+          />
 
-        <div>
-          <label style={labelStyle}>Position de la parcelle</label>
-          <button type="button" onClick={getLocation} style={btnGpsStyle}>
-            📍 Partager ma position
+          <label>Position de la parcelle</label>
+          <button type="button" className="btn secondary" style={{ width: "100%", marginBottom: 10 }} onClick={captureLocation}>
+            {location ? `📍 Position capturée (${location.lat.toFixed(5)}, ${location.lng.toFixed(5)})` : "📍 Partager ma position"}
           </button>
-          {status && <p style={{ fontSize: 12, marginTop: 8, color: "#86efac" }}>{status}</p>}
-        </div>
+          {locError && <p style={{ color: "#C4593F", fontSize: 12 }}>{locError}</p>}
 
-        <button type="submit" style={btnSubmitStyle}>
-          Valider ma parcelle
-        </button>
-      </form>
+          <label>Photo de la parcelle</label>
+          <input type="file" accept="image/*" capture="environment" onChange={(e) => setPhotoFile(e.target.files[0])} style={{ marginBottom: 20 }} />
+
+          {error && <p style={{ color: "#C4593F", fontSize: 13, marginBottom: 12 }}>{error}</p>}
+
+          <button type="submit" className="btn" style={{ width: "100%" }} disabled={submitting}>
+            {submitting ? "Enregistrement en cours…" : "Valider ma parcelle"}
+          </button>
+        </form>
+      </div>
+    </div>
     </div>
   );
 }
-
-const labelStyle = { display: "block", fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 6, fontWeight: 500 };
-const inputStyle = { width: "100%", padding: "12px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(0,0,0,0.25)", color: "#fff", fontSize: 14, outline: "none", boxSizing: "border-box" };
-const selectStyle = { ...inputStyle, appearance: "none", cursor: "pointer" };
-const btnGpsStyle = { width: "100%", padding: "12px", borderRadius: 8, border: "1px solid rgba(134,239,172,0.3)", background: "rgba(134,239,172,0.05)", color: "#86efac", fontWeight: 600, fontSize: 14, cursor: "pointer" };
-const btnSubmitStyle = { width: "100%", padding: "14px", borderRadius: 8, border: "none", background: "#4ade80", color: "#052e16", fontWeight: 600, fontSize: 15, cursor: "pointer", marginTop: 10 };
