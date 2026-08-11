@@ -1,50 +1,102 @@
+'use client';
+
+import { useState } from 'react';
 import Link from 'next/link';
 
 export default function Producteur() {
+  const [formData, setFormData] = useState({
+    nom: '',
+    cooperative: '',
+    produit: 'Karité',
+    superficie: '',
+    latitude: '',
+    longitude: ''
+  });
+  const [status, setStatus] = useState('');
+
+  const getLocation = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((position) => {
+        setFormData({
+          ...formData,
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        });
+        setStatus('📍 Position capturée avec succès !');
+      }, () => {
+        setStatus('❌ Impossible de récupérer la position GPS.');
+      });
+    }
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const producteurs = JSON.parse(localStorage.getItem('producteurs') || '[]');
+    producteurs.push({ ...formData, id: Date.now(), date: new Date().toISOString().split('T')[0] });
+    localStorage.setItem('producteurs', JSON.stringify(producteurs));
+    alert('Parcelle enregistrée avec succès !');
+    setFormData({ nom: '', cooperative: '', produit: 'Karité', superficie: '', latitude: '', longitude: '' });
+    setStatus('');
+  };
+
   return (
-    <main 
-      className="min-h-screen bg-cover bg-center relative p-6 md:p-12 flex flex-col items-center justify-center"
-      style={{
-        backgroundImage: `linear-gradient(rgba(10, 25, 15, 0.88), rgba(10, 25, 15, 0.88)), url('https://images.unsplash.com/photo-1500382017468-9049fed747ef?q=80&w=1600&auto=format&fit=crop')`
-      }}
-    >
-      <div className="w-full max-w-lg bg-slate-900/80 backdrop-blur-md border border-emerald-500/30 p-8 rounded-2xl shadow-2xl text-white">
-        <Link href="/" className="text-emerald-400 text-sm hover:underline mb-4 inline-block">← Retour à l'accueil</Link>
-        
-        <h2 className="text-2xl font-bold mb-2 text-emerald-400">📍 Enregistrer ma parcelle</h2>
-        <p className="text-sm text-emerald-100/70 mb-6">Prouvez la conformité de votre production auprès des acheteurs.</p>
+    <div style={{ maxWidth: 540, margin: "40px auto", padding: "32px 24px", borderRadius: 16, background: "rgba(18, 26, 20, 0.85)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(12px)", boxShadow: "0 20px 40px rgba(0,0,0,0.5)" }}>
+      <Link href="/" style={{ color: "rgba(255,255,255,0.5)", textDecoration: "none", fontSize: 13, display: "inline-block", marginBottom: 20 }}>
+        ← Retour à l'accueil
+      </Link>
+      
+      <h1 style={{ fontSize: 28, fontFamily: "serif", fontWeight: "normal", color: "#f3f4f6", marginBottom: 8 }}>
+        📍 Enregistrer ma parcelle
+      </h1>
+      <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 13, lineHeight: 1.5, marginBottom: 28 }}>
+        Ces informations servent à prouver la conformité de votre production auprès des acheteurs européens.
+      </p>
 
-        <form className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Nom complet</label>
-            <input type="text" placeholder="Ex: Rufin Ahouansou" className="w-full p-3 rounded-lg bg-slate-800/80 border border-slate-700 text-white focus:outline-none focus:border-emerald-500" />
-          </div>
+      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <div>
+          <label style={labelStyle}>Nom complet</label>
+          <input type="text" required placeholder="Ex : Rufin Ahouansou" value={formData.nom} onChange={e => setFormData({...formData, nom: e.target.value})} style={inputStyle} />
+        </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1">Coopérative</label>
-            <input type="text" placeholder="Nom de votre coopérative" className="w-full p-3 rounded-lg bg-slate-800/80 border border-slate-700 text-white focus:outline-none focus:border-emerald-500" />
-          </div>
+        <div>
+          <label style={labelStyle}>Coopérative</label>
+          <input type="text" required placeholder="Nom de votre coopérative" value={formData.cooperative} onChange={e => setFormData({...formData, cooperative: e.target.value})} style={inputStyle} />
+        </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1">Produit</label>
-            <select className="w-full p-3 rounded-lg bg-slate-800/80 border border-slate-700 text-white focus:outline-none focus:border-emerald-500">
-              <option>Karité</option>
-              <option>Cacao</option>
-              <option>Café</option>
-              <option>Anacarde</option>
-            </select>
-          </div>
+        <div>
+          <label style={labelStyle}>Produit</label>
+          <select value={formData.produit} onChange={e => setFormData({...formData, produit: e.target.value})} style={selectStyle}>
+            <option style={{background: "#121a14"}}>Karité</option>
+            <option style={{background: "#121a14"}}>Cacao</option>
+            <option style={{background: "#121a14"}}>Café</option>
+            <option style={{background: "#121a14"}}>Soja</option>
+            <option style={{background: "#121a14"}}>Anacarde</option>
+          </select>
+        </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1">Superficie (hectares)</label>
-            <input type="number" placeholder="Ex: 1.5" className="w-full p-3 rounded-lg bg-slate-800/80 border border-slate-700 text-white focus:outline-none focus:border-emerald-500" />
-          </div>
+        <div>
+          <label style={labelStyle}>Superficie approximative (hectares)</label>
+          <input type="number" step="0.1" required placeholder="Ex : 1.5" value={formData.superficie} onChange={e => setFormData({...formData, superficie: e.target.value})} style={inputStyle} />
+        </div>
 
-          <button type="button" className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold rounded-lg transition">
-            📍 Partager ma position GPS
+        <div>
+          <label style={labelStyle}>Position de la parcelle</label>
+          <button type="button" onClick={getLocation} style={btnGpsStyle}>
+            📍 Partager ma position
           </button>
-        </form>
-      </div>
-    </main>
+          {status && <p style={{ fontSize: 12, marginTop: 8, color: "#86efac" }}>{status}</p>}
+        </div>
+
+        <button type="submit" style={btnSubmitStyle}>
+          Valider ma parcelle
+        </button>
+      </form>
+    </div>
   );
 }
+
+const labelStyle = { display: "block", fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 6, fontWeight: 500 };
+const inputStyle = { width: "100%", padding: "12px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(0,0,0,0.25)", color: "#fff", fontSize: 14, outline: "none", boxSizing: "border-box" };
+const selectStyle = { ...inputStyle, appearance: "none", cursor: "pointer" };
+const btnGpsStyle = { width: "100%", padding: "12px", borderRadius: 8, border: "1px solid rgba(134,239,172,0.3)", background: "rgba(134,239,172,0.05)", color: "#86efac", fontWeight: 600, fontSize: 14, cursor: "pointer" };
+const btnSubmitStyle = { width: "100%", padding: "14px", borderRadius: 8, border: "none", background: "#4ade80", color: "#052e16", fontWeight: 600, fontSize: 15, cursor: "pointer", marginTop: 10 };
