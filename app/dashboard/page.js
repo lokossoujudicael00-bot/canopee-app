@@ -1,85 +1,185 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import Link from 'next/link';
+import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+import { supabase } from "@/lib/supabaseClient";
+import { generateParcelPdf, generatePaymentPdf } from "@/lib/pdf";
 
-export default function Paiement() {
-  const [formData, setFormData] = useState({
-    nom: '',
-    cooperative: '',
-    poids: '',
-    prixKilo: '',
-    mode: 'Mobile Money',
-    date: new Date().toISOString().split('T')[0]
-  });
+const SatelliteMap = dynamic(() => import("@/components/SatelliteMap"), {
+  ssr: false,
+  loading: () => (
+    <div style={{ height: 320, display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(233,228,216,0.4)" }}>
+      Chargement de la carte…
+    </div>
+  ),
+});
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const total = parseFloat(formData.poids || 0) * parseFloat(formData.prixKilo || 0);
-    const paiements = JSON.parse(localStorage.getItem('paiements') || '[]');
-    paiements.push({ ...formData, total, id: Date.now() });
-    localStorage.setItem('paiements', JSON.stringify(paiements));
-    alert(`Paiement de ${total.toLocaleString()} FCFA enregistré !`);
-    setFormData({ nom: '', cooperative: '', poids: '', prixKilo: '', mode: 'Mobile Money', date: new Date().toISOString().split('T')[0] });
-  };
+const STATUS_META = {
+  conforme: { label: "Conforme", color: "#7FB069", bg: "rgba(127,176,105,0.15)" },
+  a_verifier: { label: "À vérifier", color: "#C99B4E", bg: "rgba(201,155,78,0.15)" },
+  risque: { label: "Risque élevé", color: "#C4593F", bg: "rgba(196,89,63,0.15)" },
+};
+
+export default function DashboardPage() {
+  const [parcels, setParcels] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    setLoading(true);
+    const [parcelsRes, paymentsRes] = await Promise.all([
+      supabase.from("parcels").select("*").order("created_at", { ascending: false }),
+      supabase.from("payments").select("*").order("created_at", { ascending: false }),
+    ]);
+    if (!parcelsRes.error) setParcels(parcelsRes.data || []);
+    if (!paymentsRes.error) setPayments(paymentsRes.data || []);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    load();
+    const channel = supabase
+      .channel("dashboard-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "parcels" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "payments" }, load)
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, []);
+
+  const total = parcels.length;
+  const conforme = parcels.filter((p) => p.status === "conforme").length;
+  const risque = parcels.filter((p) => p.status === "risque").length;
+  const hectares = parcels.reduce((s, p) => s + (p.area_ha || 0), 0);
+  const pct = total ? Math.round((conforme / total) * 100) : 0;
+  const totalPaye = payments.reduce((s, p) => s + (p.total_amount || 0), 0);
 
   return (
-    <div style={{ maxWidth: 540, margin: "40px auto", padding: "32px 24px", borderRadius: 16, background: "rgba(18, 26, 20, 0.85)", border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(12px)", boxShadow: "0 20px 40px rgba(0,0,0,0.5)" }}>
-      <Link href="/" style={{ color: "rgba(255,255,255,0.5)", textDecoration: "none", fontSize: 13, display: "inline-block", marginBottom: 20 }}>
-        ← Retour à l'accueil
-      </Link>
-      
-      <h1 style={{ fontSize: 28, fontFamily: "serif", fontWeight: "normal", color: "#f3f4f6", marginBottom: 8 }}>
-        💰 Enregistrer un paiement
-      </h1>
-      <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 13, lineHeight: 1.5, marginBottom: 28 }}>
-        À remplir par la coopérative au moment de l'achat de la récolte auprès du producteur.
+    <div className="page-bg page-bg-dashboard">
+    <div className="container">
+      <h1>Tableau de bord exportateur</h1>
+      <p style={{ color: "rgba(233,228,216,0.6)", marginBottom: 28 }}>
+        Données en direct de vos coopératives fournisseurs.
       </p>
 
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-        <div>
-          <label style={labelStyle}>Nom du producteur</label>
-          <input type="text" required placeholder="Ex : Rufin Ahouansou" value={formData.nom} onChange={e => setFormData({...formData, nom: e.target.value})} style={inputStyle} />
-        </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 28 }}>
+        <StatCard label="Producteurs enregistrés" value={total} />
+        <StatCard label="Hectares cartographiés" value={hectares.toFixed(1)} />
+        <StatCard label="Taux de conformité" value={`${pct}%`} accent={pct >= 70 ? "#7FB069" : "#C99B4E"} />
+        <StatCard label="Total payé (FCFA)" value={totalPaye.toLocaleString("fr-FR")} accent="#C99B4E" />
+      </div>
 
-        <div>
-          <label style={labelStyle}>Coopérative</label>
-          <input type="text" required placeholder="Nom de la coopérative" value={formData.cooperative} onChange={e => setFormData({...formData, cooperative: e.target.value})} style={inputStyle} />
-        </div>
+      <div className="card" style={{ marginBottom: 20, padding: 8 }}>
+        <SatelliteMap parcels={parcels} />
+      </div>
 
-        <div>
-          <label style={labelStyle}>Poids acheté (kg)</label>
-          <input type="number" step="0.1" required placeholder="Ex : 50" value={formData.poids} onChange={e => setFormData({...formData, poids: e.target.value})} style={inputStyle} />
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h3 style={{ fontSize: 15, marginBottom: 14 }}>Registre des producteurs</h3>
+        {loading && <p style={{ color: "rgba(233,228,216,0.5)" }}>Chargement…</p>}
+        {!loading && parcels.length === 0 && (
+          <p style={{ color: "rgba(233,228,216,0.5)" }}>
+            Aucune parcelle enregistrée pour l'instant. Partage le lien /producteur avec tes coopératives.
+          </p>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {parcels.map((p) => {
+            const meta = STATUS_META[p.status] || STATUS_META.a_verifier;
+            return (
+              <div
+                key={p.id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  background: "rgba(233,228,216,0.03)",
+                  borderRadius: 8,
+                  padding: "10px 14px",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 500, fontSize: 14 }}>{p.producer_name}</div>
+                  <div style={{ fontSize: 12, color: "rgba(233,228,216,0.5)" }}>
+                    {p.coop} · {p.product} · {p.area_ha ? `${p.area_ha} ha` : "superficie non renseignée"}
+                  </div>
+                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: "rgba(233,228,216,0.4)" }}>
+                    {p.lat.toFixed(4)}, {p.lng.toFixed(4)}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="status-pill" style={{ color: meta.color, background: meta.bg }}>
+                    {meta.label}
+                  </span>
+                  <button
+                    className="btn secondary"
+                    style={{ padding: "6px 10px", fontSize: 12 }}
+                    onClick={() => generateParcelPdf(p)}
+                  >
+                    📄 PDF
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
+      </div>
 
-        <div>
-          <label style={labelStyle}>Prix au kilo (FCFA)</label>
-          <input type="number" required placeholder="Ex : 350" value={formData.prixKilo} onChange={e => setFormData({...formData, prixKilo: e.target.value})} style={inputStyle} />
+      <div className="card">
+        <h3 style={{ fontSize: 15, marginBottom: 14 }}>Registre des paiements</h3>
+        {!loading && payments.length === 0 && (
+          <p style={{ color: "rgba(233,228,216,0.5)" }}>
+            Aucun paiement enregistré pour l'instant.
+          </p>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {payments.map((pay) => (
+            <div
+              key={pay.id}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                background: "rgba(233,228,216,0.03)",
+                borderRadius: 8,
+                padding: "10px 14px",
+                gap: 10,
+                flexWrap: "wrap",
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 500, fontSize: 14 }}>{pay.producer_name}</div>
+                <div style={{ fontSize: 12, color: "rgba(233,228,216,0.5)" }}>
+                  {pay.coop} · {pay.weight_kg} kg à {pay.price_per_kg} FCFA/kg · {pay.payment_date}
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: "#C99B4E", fontWeight: 600, fontSize: 13 }}>
+                  {Number(pay.total_amount).toLocaleString("fr-FR")} FCFA
+                </span>
+                <button
+                  className="btn secondary"
+                  style={{ padding: "6px 10px", fontSize: 12 }}
+                  onClick={() => generatePaymentPdf(pay)}
+                >
+                  📄 PDF
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
-
-        <div>
-          <label style={labelStyle}>Mode de paiement</label>
-          <select value={formData.mode} onChange={e => setFormData({...formData, mode: e.target.value})} style={selectStyle}>
-            <option style={{background: "#121a14"}}>Mobile Money</option>
-            <option style={{background: "#121a14"}}>Espèces</option>
-            <option style={{background: "#121a14"}}>Virement Bancaire</option>
-          </select>
-        </div>
-
-        <div>
-          <label style={labelStyle}>Date du paiement</label>
-          <input type="date" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} style={inputStyle} />
-        </div>
-
-        <button type="submit" style={{ ...btnSubmitStyle, background: "#f59e0b", color: "#451a03" }}>
-          Confirmer le paiement
-        </button>
-      </form>
+      </div>
+    </div>
     </div>
   );
 }
 
-const labelStyle = { display: "block", fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 6, fontWeight: 500 };
-const inputStyle = { width: "100%", padding: "12px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(0,0,0,0.25)", color: "#fff", fontSize: 14, outline: "none", boxSizing: "border-box" };
-const selectStyle = { ...inputStyle, appearance: "none", cursor: "pointer" };
-const btnSubmitStyle = { width: "100%", padding: "14px", borderRadius: 8, border: "none", fontWeight: 600, fontSize: 15, cursor: "pointer", marginTop: 10 };
+function StatCard({ label, value, accent }) {
+  return (
+    <div className="card">
+      <div style={{ fontFamily: "'Fraunces', serif", fontSize: 26, fontWeight: 600, color: accent || "#E9E4D8" }}>
+        {value}
+      </div>
+      <div style={{ fontSize: 12, color: "rgba(233,228,216,0.55)", marginTop: 4 }}>{label}</div>
+    </div>
+  );
+}
