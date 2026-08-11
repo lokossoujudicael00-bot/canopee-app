@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { generateParcelPdf } from "@/lib/pdf";
 
 const OFFLINE_QUEUE_KEY = "canopee_offline_queue";
 
@@ -45,13 +46,15 @@ async function trySyncQueue() {
   return { synced, remaining: remaining.length };
 }
 
-const COOPS = ["IRETI M'BE", "Union Karité Savè", "Coop Néré Ouoghi"];
+// Suggestions affichées pendant la saisie, mais le champ reste libre : sur le terrain,
+// chaque producteur appartient à sa propre coopérative, souvent absente de toute liste figée.
+const COOP_SUGGESTIONS = ["IRETI M'BE", "Union Karité Savè", "Coop Néré Ouoghi"];
 const PRODUCTS = ["Karité", "Néré", "Cacao", "Café"];
 
 export default function ProducteurPage() {
   const [form, setForm] = useState({
     producerName: "",
-    coop: COOPS[0],
+    coop: "",
     product: PRODUCTS[0],
     areaHa: "",
   });
@@ -83,6 +86,7 @@ export default function ProducteurPage() {
 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
+    // Tente une synchro dès le chargement de la page, au cas où il y aurait un reliquat
     if (navigator.onLine) handleOnline();
 
     return () => {
@@ -128,6 +132,10 @@ export default function ProducteurPage() {
       setError("Merci d'indiquer le nom du producteur.");
       return;
     }
+    if (!form.coop.trim()) {
+      setError("Merci d'indiquer le nom de la coopérative.");
+      return;
+    }
 
     setSubmitting(true);
 
@@ -141,6 +149,9 @@ export default function ProducteurPage() {
       photoUrl: null,
     };
 
+    // Pas de réseau : on sauvegarde localement sur l'appareil et on synchronisera plus tard.
+    // La photo n'est pas envoyée hors-ligne (trop volumineuse pour le stockage local) —
+    // seules les données essentielles (nom, coop, produit, GPS, surface) sont mises en file.
     if (!navigator.onLine) {
       const queue = getQueue();
       queue.push(payload);
@@ -177,6 +188,8 @@ export default function ProducteurPage() {
 
       setResult(json.parcel);
     } catch (err) {
+      // Le réseau a lâché en cours de route : on bascule en secours hors-ligne
+      // plutôt que de perdre les données du producteur.
       const queue = getQueue();
       queue.push(payload);
       saveQueue(queue);
@@ -189,6 +202,7 @@ export default function ProducteurPage() {
 
   if (result || savedOffline) {
     return (
+      <div className="page-bg page-bg-parcelle">
       <div className="container">
         <div className="card" style={{ maxWidth: 480, margin: "60px auto", textAlign: "center" }}>
           {result ? (
@@ -197,6 +211,13 @@ export default function ProducteurPage() {
               <p style={{ color: "rgba(233,228,216,0.6)" }}>
                 Merci {result.producer_name}, votre parcelle a bien été enregistrée pour {result.coop}.
               </p>
+              <button
+                className="btn"
+                style={{ width: "100%", marginBottom: 10 }}
+                onClick={() => generateParcelPdf(result)}
+              >
+                📄 Télécharger la fiche PDF
+              </button>
             </>
           ) : (
             <>
@@ -219,7 +240,7 @@ export default function ProducteurPage() {
             onClick={() => {
               setResult(null);
               setSavedOffline(false);
-              setForm({ producerName: "", coop: COOPS[0], product: PRODUCTS[0], areaHa: "" });
+              setForm({ producerName: "", coop: "", product: PRODUCTS[0], areaHa: "" });
               setLocation(null);
               setPhotoFile(null);
             }}
@@ -228,10 +249,12 @@ export default function ProducteurPage() {
           </button>
         </div>
       </div>
+      </div>
     );
   }
 
   return (
+    <div className="page-bg page-bg-parcelle">
     <div className="container">
       <div className="card" style={{ maxWidth: 480, margin: "0 auto" }}>
         {!isOnline && (
@@ -279,11 +302,18 @@ export default function ProducteurPage() {
           />
 
           <label>Coopérative</label>
-          <select value={form.coop} onChange={(e) => update("coop", e.target.value)}>
-            {COOPS.map((c) => (
-              <option key={c} value={c}>{c}</option>
+          <input
+            list="coop-suggestions"
+            value={form.coop}
+            onChange={(e) => update("coop", e.target.value)}
+            placeholder="Nom de votre coopérative"
+            required
+          />
+          <datalist id="coop-suggestions">
+            {COOP_SUGGESTIONS.map((c) => (
+              <option key={c} value={c} />
             ))}
-          </select>
+          </datalist>
 
           <label>Produit</label>
           <select value={form.product} onChange={(e) => update("product", e.target.value)}>
@@ -317,6 +347,7 @@ export default function ProducteurPage() {
           </button>
         </form>
       </div>
+    </div>
     </div>
   );
 }
