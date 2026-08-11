@@ -1,190 +1,40 @@
-"use client";
+import Link from 'next/link';
 
-import { useState } from "react";
-import { generatePaymentPdf } from "@/lib/pdf";
-
-const COOP_SUGGESTIONS = ["IRETI M'BE", "Union Karité Savè", "Coop Néré Ouoghi"];
-const METHODS = [
-  { value: "mobile_money", label: "Mobile Money" },
-  { value: "especes", label: "Espèces" },
-  { value: "virement", label: "Virement" },
-];
-
-export default function PaiementPage() {
-  const [form, setForm] = useState({
-    producerName: "",
-    coop: "",
-    weightKg: "",
-    pricePerKg: "",
-    paymentMethod: "mobile_money",
-    paymentDate: new Date().toISOString().slice(0, 10),
-  });
-  const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState("");
-
-  function update(field, value) {
-    setForm((f) => ({ ...f, [field]: value }));
-  }
-
-  const total = (parseFloat(form.weightKg) || 0) * (parseFloat(form.pricePerKg) || 0);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setError("");
-
-    if (!form.producerName.trim() || !form.coop.trim() || !form.weightKg || !form.pricePerKg) {
-      setError("Merci de remplir le nom, la coopérative, le poids et le prix au kilo.");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const res = await fetch("/api/payments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // Saisie entièrement manuelle : aucune parcelle existante n'est requise pour
-        // enregistrer un paiement, exactement comme le nom de la coopérative.
-        body: JSON.stringify({
-          producerName: form.producerName,
-          coop: form.coop,
-          weightKg: form.weightKg,
-          pricePerKg: form.pricePerKg,
-          paymentMethod: form.paymentMethod,
-          paymentDate: form.paymentDate,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Erreur lors de l'enregistrement.");
-      setResult(json.payment);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  if (result) {
-    return (
-      <div className="page-bg page-bg-paiement">
-      <div className="container">
-        <div className="card" style={{ maxWidth: 480, margin: "60px auto", textAlign: "center" }}>
-          <h2>✅ Paiement enregistré</h2>
-          <p style={{ color: "rgba(233,228,216,0.6)" }}>
-            {result.producer_name} a été payé {result.total_amount.toLocaleString("fr-FR")} FCFA
-            pour {result.weight_kg} kg, le {result.payment_date}.
-          </p>
-          <button
-            className="btn"
-            style={{ marginTop: 12, width: "100%" }}
-            onClick={() => generatePaymentPdf(result)}
-          >
-            📄 Télécharger le reçu PDF
-          </button>
-          <button
-            className="btn secondary"
-            style={{ marginTop: 10 }}
-            onClick={() => {
-              setResult(null);
-              setForm({
-                producerName: "",
-                coop: "",
-                weightKg: "",
-                pricePerKg: "",
-                paymentMethod: "mobile_money",
-                paymentDate: new Date().toISOString().slice(0, 10),
-              });
-            }}
-          >
-            + Enregistrer un autre paiement
-          </button>
-        </div>
-      </div>
-      </div>
-    );
-  }
-
+export default function Paiement() {
   return (
-    <div className="page-bg page-bg-paiement">
-    <div className="container">
-      <div className="card" style={{ maxWidth: 480, margin: "0 auto" }}>
-        <h2>💰 Enregistrer un paiement</h2>
-        <p style={{ color: "rgba(233,228,216,0.55)", fontSize: 13, marginBottom: 20 }}>
-          À remplir par la coopérative au moment de l'achat de la récolte auprès du producteur.
-        </p>
+    <main 
+      className="min-h-screen bg-cover bg-center relative p-6 md:p-12 flex flex-col items-center justify-center"
+      style={{
+        backgroundImage: `linear-gradient(rgba(10, 25, 15, 0.88), rgba(10, 25, 15, 0.88)), url('https://images.unsplash.com/photo-1615811361523-6bd03d7748e7?q=80&w=1600&auto=format&fit=crop')`
+      }}
+    >
+      <div className="w-full max-w-lg bg-slate-900/80 backdrop-blur-md border border-amber-500/30 p-8 rounded-2xl shadow-2xl text-white">
+        <Link href="/" className="text-amber-400 text-sm hover:underline mb-4 inline-block">← Retour à l'accueil</Link>
+        
+        <h2 className="text-2xl font-bold mb-2 text-amber-400">💰 Enregistrer un paiement</h2>
+        <p className="text-sm text-emerald-100/70 mb-6">Saisissez les détails de la transaction pour le producteur.</p>
 
-        <form onSubmit={handleSubmit}>
-          <label>Nom du producteur</label>
-          <input
-            value={form.producerName}
-            onChange={(e) => update("producerName", e.target.value)}
-            placeholder="Ex : Rufin Ahouansou"
-            required
-          />
+        <form className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Producteur</label>
+            <input type="text" placeholder="Nom du producteur" className="w-full p-3 rounded-lg bg-slate-800/80 border border-slate-700 text-white focus:outline-none focus:border-amber-500" />
+          </div>
 
-          <label>Coopérative</label>
-          <input
-            list="coop-suggestions"
-            value={form.coop}
-            onChange={(e) => update("coop", e.target.value)}
-            placeholder="Nom de la coopérative"
-            required
-          />
-          <datalist id="coop-suggestions">
-            {COOP_SUGGESTIONS.map((c) => (
-              <option key={c} value={c} />
-            ))}
-          </datalist>
+          <div>
+            <label className="block text-sm font-medium mb-1">Montant (FCFA)</label>
+            <input type="number" placeholder="Ex: 150000" className="w-full p-3 rounded-lg bg-slate-800/80 border border-slate-700 text-white focus:outline-none focus:border-amber-500" />
+          </div>
 
-          <label>Poids acheté (kg)</label>
-          <input
-            type="number"
-            step="0.1"
-            value={form.weightKg}
-            onChange={(e) => update("weightKg", e.target.value)}
-            placeholder="Ex : 50"
-            required
-          />
+          <div>
+            <label className="block text-sm font-medium mb-1">Quantité (kg)</label>
+            <input type="number" placeholder="Ex: 250" className="w-full p-3 rounded-lg bg-slate-800/80 border border-slate-700 text-white focus:outline-none focus:border-amber-500" />
+          </div>
 
-          <label>Prix au kilo (FCFA)</label>
-          <input
-            type="number"
-            step="1"
-            value={form.pricePerKg}
-            onChange={(e) => update("pricePerKg", e.target.value)}
-            placeholder="Ex : 350"
-            required
-          />
-
-          {total > 0 && (
-            <p style={{ fontSize: 13, color: "#7FB069", marginBottom: 14 }}>
-              Total à payer : {total.toLocaleString("fr-FR")} FCFA
-            </p>
-          )}
-
-          <label>Mode de paiement</label>
-          <select value={form.paymentMethod} onChange={(e) => update("paymentMethod", e.target.value)}>
-            {METHODS.map((m) => (
-              <option key={m.value} value={m.value}>{m.label}</option>
-            ))}
-          </select>
-
-          <label>Date du paiement</label>
-          <input
-            type="date"
-            value={form.paymentDate}
-            onChange={(e) => update("paymentDate", e.target.value)}
-            style={{ marginBottom: 20 }}
-          />
-
-          {error && <p style={{ color: "#C4593F", fontSize: 13, marginBottom: 12 }}>{error}</p>}
-
-          <button type="submit" className="btn" style={{ width: "100%" }} disabled={submitting}>
-            {submitting ? "Enregistrement…" : "Confirmer le paiement"}
+          <button type="button" className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg transition">
+            Valider le paiement
           </button>
         </form>
       </div>
-    </div>
-    </div>
+    </main>
   );
 }
