@@ -2,10 +2,6 @@ import Link from "next/link";
 
 export default function Home() {
   return (
-    import Link from "next/link";
-
-export default function Home() {
-  return (
     <main 
       className="min-h-screen bg-cover bg-center relative p-12"
       style={{
@@ -13,9 +9,6 @@ export default function Home() {
       }}
     >
       <div className="top-nav" style={{ padding: 0, border: "none", marginBottom: 40 }}>
-      <div className="top-nav" style={{ padding: 0, border: "none", marginBottom: 40 }}>
-        <div className="brand">🌿 Canopée</div>
-      </div>
 
       <h1 style={{ fontSize: 32 }}>Traçabilité EUDR pour vos coopératives fournisseurs</h1>
       <p style={{ color: "rgba(233,228,216,0.6)", maxWidth: 560, marginBottom: 32 }}>
