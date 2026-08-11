@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabaseClient";
 import { generateParcelPdf, generatePaymentPdf } from "@/lib/pdf";
 
-const SatelliteMap = dynamic(() => import("@/components/SatelliteMap"), {
+const SatelliteMap = dynamic(() => import("../../components/SatelliteMap"), {
   ssr: false,
   loading: () => (
     <div style={{ height: 320, display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(233,228,216,0.4)" }}>
